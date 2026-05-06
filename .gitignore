@@ -1,0 +1,11 @@
+# docs-site has its own git repo
+docs-site/
+
+# Obsidian / tool internals
+tnote/.obsidian/
+tnote/.trash/
+tnote/.claudian/
+tnote/.makemd/
+tnote/.space/
+
+.DS_Store
