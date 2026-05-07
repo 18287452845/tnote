@@ -1,0 +1,9 @@
+[project]
+requires = ["nodejs-24", "python-3.11"]
+project_type = ""
+
+[preview]
+preview_enable = "disabled"
+
+[subprojects]
+path = ["tnote"]
