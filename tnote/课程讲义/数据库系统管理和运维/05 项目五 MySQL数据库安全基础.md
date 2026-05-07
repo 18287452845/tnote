@@ -79,7 +79,7 @@ MySQL 是世界上最流行的**开源关系型数据库管理系统（RDBMS）*
 MySQL 8.0 默认使用 `caching_sha2_password`，部分旧版客户端（如老版本 Navicat12、PHP 7.1 以下的 `mysql_connect`）可能连接失败。解决方案：
 
 - 升级客户端到支持新插件的版本（推荐）
-- 对特定账号降级认证插件：`ALTER USER 'app'@'192.168.100.%' IDENTIFIED WITH mysql_native_password BY '密码';`
+- 对特定账号降级认证插件：`ALTER USER 'app'@'192.168.100.%' IDENTIFIED WITH mysql_native_password BY '123456';`
 
 </aside>
 
@@ -211,17 +211,32 @@ sudo mysql_secure_installation
 
 **向导建议选项（零基础按这个选）**
 
-1. 设置 / 修改 root 密码 → 设置强口令（或后续用 ALTER USER 设置）
+1. 设置 / 修改 root 密码 → 输入 `123456`（课堂统一密码，方便后续操作）
 2. 删除匿名用户 → Yes
 3. 禁止 root 远程登录 → Yes
 4. 删除 test 数据库 → Yes
 5. 刷新权限表 → Yes
+
+**如果向导没有提示设置密码**（部分 Ubuntu 版本跳过此步），安装完成后手动执行：
+
+```sql
+sudo mysql
+ALTER USER 'root'@'localhost' IDENTIFIED WITH mysql_native_password BY '123456';
+FLUSH PRIVILEGES;
+exit;
+```
+
+> 这一步同时将 root 的认证插件从 `auth_socket` 改为 `mysql_native_password`，后续就可以用 `mysql -u root -p123456` 密码方式登录了。
+
 </aside>
 
 #### 第 5 步：首次登录验证
 
 ```bash
-# Ubuntu apt 安装后 root 常见为 auth_socket：sudo 即可进入
+# 方式一：如果刚才已将 root 改为密码认证，用密码登录
+mysql -u root -p123456
+
+# 方式二：如果还没改认证插件，用 sudo 登录
 sudo mysql
 ```
 
@@ -238,7 +253,7 @@ exit;
 
 Ubuntu 的 apt 安装默认将 root 的认证插件设为 `auth_socket`，该插件不检查密码，而是验证"当前 Linux 用户是否为 root"。所以 `sudo mysql` 能直接进入，这是安全设计——只有 root 能登录数据库管理员。
 
-**这不是"没设密码"**，而是用操作系统级别的权限替代了数据库密码认证。
+**但这只适合本机操作**。如果想让 root 也能用密码登录（方便脚本和远程维护），需要在上一步中用 `ALTER USER` 将认证插件改为 `mysql_native_password`。
 
 </aside>
 
@@ -248,7 +263,8 @@ Ubuntu 的 apt 安装默认将 root 的认证插件设为 `auth_socket`，该插
 **第 1 课小结**
 
 - 安装的目标不是"看懂所有概念"，而是完成：安装→启动→加固→验证
-- `sudo mysql` 能进是因为 Ubuntu 默认 auth_socket（不是"没设密码"）
+- `sudo mysql` 能进是因为 Ubuntu 默认 auth_socket；改为密码认证后用 `mysql -u root -p123456` 登录
+- 课堂统一密码：`123456`，后续所有账号都用这个密码
 </aside>
 
 ---
@@ -579,6 +595,11 @@ sudo mysql
 ```
 
 ```sql
+-- 0) 降低密码策略（课堂环境必须，否则 123456 无法通过 MEDIUM 策略）
+INSTALL COMPONENT 'file://component_validate_password';
+SET GLOBAL validate_password.policy = LOW;
+SET GLOBAL validate_password.length = 6;
+
 -- 1) 准备示例库和示例表
 CREATE DATABASE IF NOT EXISTS stusta;
 USE stusta;
@@ -595,8 +616,8 @@ INSERT INTO students (name, score) VALUES
     ('李四', 92.0),
     ('王五', 76.0);
 
--- 2) 创建远程账号（网段限制）
-CREATE USER IF NOT EXISTS 'app'@'192.168.100.%' IDENTIFIED BY 'App@Pass123!';
+-- 2) 创建远程账号（网段限制，使用 mysql_native_password 确保 Navicat 兼容）
+CREATE USER IF NOT EXISTS 'app'@'192.168.100.%' IDENTIFIED WITH mysql_native_password BY '123456';
 
 -- 3) 最小权限授权（只对 stusta.* 的 CRUD）
 GRANT SELECT, INSERT, UPDATE, DELETE ON stusta.* TO 'app'@'192.168.100.%';
@@ -655,7 +676,7 @@ ipconfig
 | 主机 | `192.168.100.20` | 虚拟机的实际 IP |
 | 端口 | `3306` | MySQL 默认端口 |
 | 用户名 | `app` | 刚才创建的最小权限账号 |
-| 密码 | `App@Pass123!` | 创建时设定的密码 |
+| 密码 | `123456` | 课堂统一密码 |
 
 点击"测试连接"，成功后保存并双击打开连接。
 
@@ -668,7 +689,7 @@ ipconfig
 
 ```sql
 -- 在虚拟机 MySQL 中降级该账号的认证插件
-ALTER USER 'app'@'192.168.100.%' IDENTIFIED WITH mysql_native_password BY 'App@Pass123!';
+ALTER USER 'app'@'192.168.100.%' IDENTIFIED WITH mysql_native_password BY '123456';
 ```
 
 推荐方案是升级 Navicat 到 16+ 版本（原生支持新插件）。
@@ -756,10 +777,10 @@ FLUSH PRIVILEGES;
 只要使用 MySQL 官方账号权限语句，权限会自动刷新并立即生效：
 
 ```sql
-CREATE USER 'app'@'192.168.100.%' IDENTIFIED BY 'App@Pass123!';
+CREATE USER 'app'@'192.168.100.%' IDENTIFIED BY '123456';
 GRANT SELECT ON stusta.* TO 'app'@'192.168.100.%';
 REVOKE SELECT ON stusta.* FROM 'app'@'192.168.100.%';
-ALTER USER 'app'@'192.168.100.%' IDENTIFIED BY 'NewPass@456!';
+ALTER USER 'app'@'192.168.100.%' IDENTIFIED BY '123456';
 DROP USER 'app'@'192.168.100.%';
 ```
 
@@ -824,10 +845,10 @@ SELECT user, host, plugin FROM mysql.user WHERE plugin != 'auth_socket';
 
 ```sql
 -- 修改其他用户的密码（推荐方式，MySQL 8.0）
-ALTER USER 'app'@'192.168.100.%' IDENTIFIED BY 'NewPass@456!';
+ALTER USER 'app'@'192.168.100.%' IDENTIFIED BY '123456';
 
 -- 修改自己的密码
-ALTER USER USER() IDENTIFIED BY 'MyNewPass@789!';
+ALTER USER USER() IDENTIFIED BY '123456';
 ```
 
 #### 撤销权限
@@ -866,34 +887,65 @@ DROP USER 'app'@'192.168.100.%';
 
 ### 3.11 密码策略与安全加固
 
-MySQL 8.0 内置了密码验证组件 `validate_password`，可以强制密码复杂度：
+MySQL 8.0 内置了密码验证组件 `validate_password`，可以强制密码复杂度。
+
+<aside>
+⚠️
+
+**课堂环境必须先降低密码策略**
+
+课堂统一使用 `123456` 作为密码，但 `validate_password` 默认策略为 `MEDIUM`（要求大小写 + 数字 + 特殊字符 + 至少 8 位），`123456` 无法通过。因此需要先降低策略再创建账号：
 
 ```sql
--- 查看密码策略（需要先安装组件）
+-- 安装密码验证组件（如果尚未安装）
 INSTALL COMPONENT 'file://component_validate_password';
 
+-- 降低策略为 LOW，允许纯数字短密码
+SET GLOBAL validate_password.policy = LOW;
+SET GLOBAL validate_password.length = 6;
+```
+
+执行以上语句后，后续创建账号时就可以使用 `123456` 了。
+
+</aside>
+
+#### 密码策略参数说明
+
+```sql
 -- 查看当前策略
 SHOW VARIABLES LIKE 'validate_password%';
 ```
 
-| 参数 | 含义 | 默认值 | 建议值 |
-| --- | --- | --- | --- |
-| `validate_password.length` | 密码最短长度 | 8 | 8+ |
-| `validate_password.mixed_case_count` | 大小写字母最少各几个 | 1 | 1 |
-| `validate_password.number_count` | 数字最少几个 | 1 | 1 |
-| `validate_password.special_char_count` | 特殊字符最少几个 | 1 | 1 |
-| `validate_password.policy` | 策略等级 | MEDIUM | MEDIUM |
+| 参数 | 含义 | 默认值 | 课堂值 | 生产建议值 |
+| --- | --- | --- | --- | --- |
+| `validate_password.policy` | 策略等级 | MEDIUM | LOW | MEDIUM |
+| `validate_password.length` | 密码最短长度 | 8 | 6 | 8+ |
+| `validate_password.mixed_case_count` | 大小写字母最少各几个 | 1 | 0（LOW 模式不检查） | 1 |
+| `validate_password.number_count` | 数字最少几个 | 1 | 0（LOW 模式不检查） | 1 |
+| `validate_password.special_char_count` | 特殊字符最少几个 | 1 | 0（LOW 模式不检查） | 1 |
 
 策略等级说明：
-- `LOW`：只检查长度
-- `MEDIUM`：长度 + 大小写 + 数字 + 特殊字符
-- `STRONG`：MEDIUM + 字典检查
+- `LOW`：只检查长度（课堂环境使用）
+- `MEDIUM`：长度 + 大小写 + 数字 + 特殊字符（生产环境推荐）
+- `STRONG`：MEDIUM + 字典检查（高安全要求场景）
 
-```sql
--- 修改密码策略（按需调整）
-SET GLOBAL validate_password.policy = MEDIUM;
-SET GLOBAL validate_password.length = 10;
+<aside>
+💡
+
+**课堂 vs 生产**
+
+- **课堂**：`policy = LOW`，`length = 6`，密码统一 `123456`，专注学习操作流程
+- **生产**：`policy = MEDIUM` 或 `STRONG`，`length ≥ 8`，必须使用强密码
+
+策略的修改是临时生效的（`SET GLOBAL`），重启后恢复默认。如果需要永久生效，在配置文件中添加：
+
+```ini
+[mysqld]
+validate_password.policy = LOW
+validate_password.length = 6
 ```
+
+</aside>
 
 <aside>
 ✅
@@ -905,7 +957,8 @@ SET GLOBAL validate_password.length = 10;
 - 远程访问建议：监听边界 + 防火墙边界 + 账号 host 边界 + 最小权限授权
 - 标准权限语句会自动生效；直接改 `mysql.user` 等系统表后才需要 `FLUSH PRIVILEGES`
 - 账号有完整生命周期：创建 → 授权 → 验证 → 修改 → 锁定 → 删除
-- 生产环境启用 `validate_password` 组件强制密码复杂度
+- 课堂密码统一 `123456`，创建账号前需先降低 `validate_password` 策略为 LOW
+- 生产环境使用 MEDIUM/STRONG 策略，强制密码复杂度
 </aside>
 
 ---
@@ -1306,7 +1359,7 @@ sudo mysql
 进入后直接修改密码即可：
 
 ```sql
-ALTER USER 'root'@'localhost' IDENTIFIED BY 'NewRoot@Pass123!';
+ALTER USER 'root'@'localhost' IDENTIFIED BY '123456';
 ```
 
 只有在无法通过任何管理员方式登录时，才使用下面的"初始化文件重置法"。
@@ -1328,7 +1381,7 @@ sudo nano /tmp/mysql-reset.sql
 在文件中写入：
 
 ```sql
-ALTER USER 'root'@'localhost' IDENTIFIED BY 'NewRoot@Pass123!';
+ALTER USER 'root'@'localhost' IDENTIFIED BY '123456';
 ```
 
 保存后设置权限，并用初始化文件方式启动：
@@ -1375,7 +1428,7 @@ net stop MySQL80
 2. 创建临时文件 `C:\mysql-reset.sql`，内容如下：
 
 ```sql
-ALTER USER 'root'@'localhost' IDENTIFIED BY 'NewRoot@Pass123!';
+ALTER USER 'root'@'localhost' IDENTIFIED BY '123456';
 ```
 
 3. 找到 `mysqld.exe` 所在目录，使用初始化文件临时启动。常见路径示例：
