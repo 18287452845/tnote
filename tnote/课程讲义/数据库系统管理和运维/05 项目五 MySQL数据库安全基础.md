@@ -1375,43 +1375,40 @@ ALTER USER 'root'@'localhost' IDENTIFIED BY '123456';
 
 #### 方法一：Linux / Ubuntu 重置 root 密码
 
-思路：停止 MySQL → 准备一条改密 SQL → 用 `--init-file` 临时启动 MySQL → 自动执行改密 → 删除临时文件 → 正常启动服务。
+思路：停止 MySQL → 用 `--skip-grant-tables` 跳过权限验证启动 → 手动改密 → 正常重启服务。
+
+> 为什么要用 `--skip-grant-tables`？因为跳过授权表时，`validate_password` 组件也不会加载，任何密码都能设置成功。如果用 `--init-file` 方法，遇到 MEDIUM 密码策略会导致 `123456` 被拒绝，服务器直接退出。
 
 ```bash
 # 1) 停止 MySQL 服务
 sudo systemctl stop mysql
 
-# 2) 创建临时改密文件
-sudo nano /tmp/mysql-reset.sql
+# 2) 跳过授权表启动（--skip-networking 禁止远程连接，确保安全）
+sudo mysqld --skip-grant-tables --skip-networking --user=mysql &
 ```
 
-在文件中写入：
+等待几秒让 MySQL 启动完成，然后无密码登录：
+
+```bash
+# 3) 无密码连接 MySQL
+mysql -u root
+```
+
+在 MySQL 中执行改密（必须先 `FLUSH PRIVILEGES` 重新加载权限表）：
 
 ```sql
+FLUSH PRIVILEGES;
 ALTER USER 'root'@'localhost' IDENTIFIED BY '123456';
+exit
 ```
 
-保存后设置权限，并用初始化文件方式启动：
+关闭临时实例并正常启动：
 
 ```bash
-# 3) 限制临时文件权限
-sudo chown mysql:mysql /tmp/mysql-reset.sql
-sudo chmod 600 /tmp/mysql-reset.sql
+# 4) 关闭临时实例（--skip-grant-tables 下无需密码）
+sudo mysqladmin -u root shutdown
 
-# 4) 临时启动 mysqld，启动时会自动执行改密 SQL
-sudo mysqld --user=mysql --init-file=/tmp/mysql-reset.sql --skip-networking &
-```
-
-等待几秒后关闭临时 MySQL，再按正常方式启动：
-
-```bash
-# 5) 用新密码关闭临时实例
-mysqladmin -u root -p shutdown
-
-# 6) 删除临时文件，避免密码泄露
-sudo rm -f /tmp/mysql-reset.sql
-
-# 7) 正常启动 MySQL 服务
+# 5) 正常启动 MySQL 服务
 sudo systemctl start mysql
 sudo systemctl status mysql --no-pager
 ```
@@ -1420,6 +1417,7 @@ sudo systemctl status mysql --no-pager
 
 ```bash
 mysql -u root -p
+# 输入 123456
 ```
 
 #### 方法二：Windows 重置 root 密码
@@ -1432,30 +1430,35 @@ mysql -u root -p
 net stop MySQL80
 ```
 
-2. 创建临时文件 `C:\mysql-reset.sql`，内容如下：
-
-```sql
-ALTER USER 'root'@'localhost' IDENTIFIED BY '123456';
-```
-
-3. 找到 `mysqld.exe` 所在目录，使用初始化文件临时启动。常见路径示例：
+2. 跳过授权表启动 MySQL（`--skip-networking` 禁止远程连接，确保安全）：
 
 ```powershell
-"C:\Program Files\MySQL\MySQL Server 8.0\bin\mysqld.exe" --init-file=C:\mysql-reset.sql --console --skip-networking
+"C:\Program Files\MySQL\MySQL Server 8.0\bin\mysqld.exe" --skip-grant-tables --skip-networking --console
 ```
 
-看到 MySQL 启动成功后，新开一个管理员 CMD / PowerShell 窗口，测试登录并关闭临时实例：
+看到 MySQL 启动成功后，**新开一个管理员 CMD / PowerShell 窗口**，无密码连接并改密：
+
+```powershell
+"C:\Program Files\MySQL\MySQL Server 8.0\bin\mysql.exe" -u root
+```
+
+```sql
+FLUSH PRIVILEGES;
+ALTER USER 'root'@'localhost' IDENTIFIED BY '123456';
+exit
+```
+
+3. 回到第一个窗口按 `Ctrl + C` 关闭临时 MySQL，然后正常启动服务：
+
+```powershell
+net start MySQL80
+```
+
+验证新密码：
 
 ```powershell
 "C:\Program Files\MySQL\MySQL Server 8.0\bin\mysql.exe" -u root -p
-"C:\Program Files\MySQL\MySQL Server 8.0\bin\mysqladmin.exe" -u root -p shutdown
-```
-
-4. 删除临时文件并正常启动服务：
-
-```powershell
-del C:\mysql-reset.sql
-net start MySQL80
+# 输入 123456
 ```
 
 <aside>
@@ -1463,9 +1466,8 @@ net start MySQL80
 
 **安全提醒**
 
-- 临时 SQL 文件中包含明文新密码，重置完成后必须删除
-- 重置期间建议加 `--skip-networking`，避免网络连接进入临时实例
-- 不建议长期使用 `--skip-grant-tables`，它会绕过权限检查，风险更高
+- `--skip-grant-tables` 会绕过所有权限检查，任何人都能无密码连接，因此必须同时加 `--skip-networking` 禁止远程连接
+- 重置完成后立即正常重启服务，不要长期运行在跳过授权表模式
 - 重置完成后应立即验证登录、记录变更原因，并更换业务系统中相关凭证
 
 </aside>
