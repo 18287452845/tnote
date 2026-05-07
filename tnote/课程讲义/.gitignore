@@ -1,0 +1,13 @@
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Obsidian
+.obsidian/
+.trash/
+
+# Temp files
+*.tmp
+*.bak
+~$*
