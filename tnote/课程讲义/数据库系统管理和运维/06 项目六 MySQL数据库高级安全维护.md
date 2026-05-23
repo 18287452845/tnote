@@ -1025,7 +1025,7 @@ SHOW MASTER STATUS;
 +------------------+----------+
 | File             | Position |
 +------------------+----------+
-| mysql-bin.000014 |      849 |
+| mysql-bin.000013 |      849 |
 +------------------+----------+
 ```
 
@@ -1051,7 +1051,7 @@ UNLOCK TABLES;
 将备份文件传输到从库：
 
 ```bash
-scp /tmp/full_backup.sql admin@192.168.100.21:/tmp/
+scp /tmp/full_backup.sql ly@192.168.1.139:/tmp/
 ```
 
 在从库还原备份：
@@ -1078,7 +1078,7 @@ CHANGE REPLICATION SOURCE TO
     SOURCE_HOST = '192.168.1.136',
     SOURCE_USER = 'repl',
     SOURCE_PASSWORD = '123456',
-    SOURCE_LOG_FILE = 'mysql-bin.000014',
+    SOURCE_LOG_FILE = 'mysql-bin.000013',
     SOURCE_LOG_POS = 849,
     SOURCE_PORT = 3306;
 ```

