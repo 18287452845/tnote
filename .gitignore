@@ -9,3 +9,6 @@ tnote/.makemd/
 tnote/.space/
 
 .DS_Store
+
+# Teacher's verbatim scripts — local only, not for publication
+tnote/逐字稿/
