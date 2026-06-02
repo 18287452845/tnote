@@ -1025,7 +1025,7 @@ SHOW MASTER STATUS;
 +------------------+----------+
 | File             | Position |
 +------------------+----------+
-| mysql-bin.000013 |      849 |
+| mysql-bin.000014 |      681 |
 +------------------+----------+
 ```
 
@@ -1051,7 +1051,7 @@ UNLOCK TABLES;
 将备份文件传输到从库：
 
 ```bash
-scp /tmp/full_backup.sql ly@192.168.1.139:/tmp/
+scp /tmp/full_backup.sql ly@192.168.1.141:/tmp/
 ```
 
 在从库还原备份：
@@ -1085,14 +1085,14 @@ CHANGE REPLICATION SOURCE TO
 
 参数说明：
 
-| 参数 | 含义 |
-| --- | --- |
-| `SOURCE_HOST` | 主库 IP 地址 |
-| `SOURCE_USER` | 复制账号用户名 |
-| `SOURCE_PASSWORD` | 复制账号密码 |
+| 参数                | 含义                |
+| ----------------- | ----------------- |
+| `SOURCE_HOST`     | 主库 IP 地址          |
+| `SOURCE_USER`     | 复制账号用户名           |
+| `SOURCE_PASSWORD` | 复制账号密码            |
 | `SOURCE_LOG_FILE` | 第四步记录的 binlog 文件名 |
-| `SOURCE_LOG_POS` | 第四步记录的 binlog 位置 |
-| `SOURCE_PORT` | 主库端口 |
+| `SOURCE_LOG_POS`  | 第四步记录的 binlog 位置  |
+| `SOURCE_PORT`     | 主库端口              |
 
 启动复制：
 
