@@ -66,9 +66,9 @@ net user <用户名> /delete
 | `/active:yes/no` | 启用或禁用账户 | `net user zhangsan /active:no` |
 | `/fullname:"名称"` | 设置显示全名 | `/fullname:"张三"` |
 | `/comment:"备注"` | 添加账户描述 | `/comment:"销售部员工"` |
-| `/expires:<日期|never>` | 设置账户过期日期 |  |
+| `/expires:<日期\|never>` | 设置账户过期日期 |  |
 | `/passwordchg:yes/no` | 是否允许用户自改密码 | `/passwordchg:no` |
-| `/times:<范围|all>` | 限制登录时间段 |  |
+| `/times:<范围\|all>` | 限制登录时间段 |  |
 
 **方式二：PowerShell 命令（推荐）**
 

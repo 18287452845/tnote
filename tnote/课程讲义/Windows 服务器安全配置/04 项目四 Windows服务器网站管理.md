@@ -252,7 +252,7 @@ Get-Process w3wp
 | **网站绑定** | IP地址+端口+主机名的组合，确定网站监听哪些请求 | *:80:www.genshin-wiki.local |
 | **默认文档** | 访问目录时自动返回的文件名列表 | index.html、default.htm |
 | **应用程序池** | 为网站提供独立运行环境的工作进程容器 | GenshinAppPool |
-| **虚拟目录** | 将磁盘上其他位置的目录映射到网站URL路径下 | /downloads → C:files| |
+| **虚拟目录** | 将磁盘上其他位置的目录映射到网站URL路径下 | /downloads → C:files |
 | **主机名（Host Header）** | 通过域名区分同一IP+端口上的不同网站 | www.genshin-wiki.local vs test.genshin-wiki.local |
 
 ### 🧩 知识点小结（核心概念）
