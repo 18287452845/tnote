@@ -1069,7 +1069,7 @@ WebShell脚本执行
 | `ASP.NET` | IIS + .NET Framework / .NET                | `.aspx`、`.ashx`         | `Eval`（JScript）、`Process.Start`、`Assembly.Load`         |
 | JSP     | Tomcat、JBoss、WebLogic 等 Java 容器            | `.jsp`、`.jspx`          | `Runtime.exec`、`ProcessBuilder`                         |
 
-> 💡 **语言适配的必要性**：WebShell 必须与目标服务端环境匹配——PHP 木马放到纯 IIS+ASP.NET 环境只会被作为静态文本返回。攻击者通常先通过响应头、扩展名、报错信息等进行指纹识别，再选用对应语言的木马。
+> 💡 **语言适配的必要性**：WebShell 必须与目标服务端环境匹配——PHP 木马放到纯 IIS+`ASP.NET` 环境只会被作为静态文本返回。攻击者通常先通过响应头、扩展名、报错信息等进行指纹识别，再选用对应语言的木马。
 
 **各语言一句话木马示例**：
 
